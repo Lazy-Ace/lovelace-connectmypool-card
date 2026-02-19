@@ -20,9 +20,18 @@
  *   - light.pool_lights
  */
 
-const LitElement = Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
-const html = LitElement.prototype.html;
-const css = LitElement.prototype.css;
+/* HA Lit compatibility shim (robust across HA versions / load order) */
+const _panel = customElements.get("ha-panel-lovelace");
+const _haLit = window.LitElement;
+const LitElement =
+  _haLit ||
+  (_panel ? Object.getPrototypeOf(_panel) : null) ||
+  Object.getPrototypeOf(customElements.get("ha-card") || HTMLElement);
+
+const html = window.html || LitElement.prototype.html;
+const css = window.css || LitElement.prototype.css;
+
+console.info("[connectmypool-card] loaded v1.0.1");
 
 const DOMAIN_LABELS = {
   switch: "Switches",
@@ -420,7 +429,9 @@ class ConnectMyPoolCard extends LitElement {
   }
 }
 
-customElements.define("connectmypool-card", ConnectMyPoolCard);
+if (!customElements.get("connectmypool-card")) {
+  customElements.define("connectmypool-card", ConnectMyPoolCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({

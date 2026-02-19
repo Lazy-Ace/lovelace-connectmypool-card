@@ -2,5 +2,6 @@
   "name": "ConnectMyPool Lovelace Card",
   "render_readme": true,
   "content_in_root": false,
-  "filename": "connectmypool-card.js"
+  "filename": "connectmypool-card.js",
+  "version": "1.0.1"
 }
