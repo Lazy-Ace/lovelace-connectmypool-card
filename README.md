@@ -40,5 +40,5 @@ lights:
 ## Troubleshooting
 
 - If the card doesn't appear in the card picker, hard-refresh your browser (Ctrl+F5) or clear cache, then reload Home Assistant.
-- Check your browser console for errors (Developer Tools → Console). You should see: `[connectmypool-card] loaded v1.0.1`.
+- Check your browser console for errors (Developer Tools → Console). You should see: `[connectmypool-card] loaded v1.0.2`.
 - If you see `Custom element doesn't exist: connectmypool-card`, the resource is not loaded. Confirm the resource URL under Settings → Dashboards → Resources.

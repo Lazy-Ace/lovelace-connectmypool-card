@@ -1,4 +1,10 @@
-\
+(async () => {
+  try {
+    await customElements.whenDefined('ha-panel-lovelace');
+  } catch (e) {
+    // ignore
+  }
+  try {
 /* ConnectMyPool Lovelace Card
  *
  * A lightweight (no-build) custom card that works with the ConnectMyPool integration entities.
@@ -31,7 +37,7 @@ const LitElement =
 const html = window.html || LitElement.prototype.html;
 const css = window.css || LitElement.prototype.css;
 
-console.info("[connectmypool-card] loaded v1.0.1");
+console.info("[connectmypool-card] loaded v1.0.2");
 
 const DOMAIN_LABELS = {
   switch: "Switches",
@@ -439,3 +445,8 @@ window.customCards.push({
   name: "ConnectMyPool Card",
   description: "A dashboard card for the ConnectMyPool integration.",
 });
+
+  } catch (e) {
+    console.error('[connectmypool-card] failed to load', e);
+  }
+})();
