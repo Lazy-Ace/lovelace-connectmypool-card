@@ -4,7 +4,7 @@ A lightweight custom Lovelace card that works nicely with the **ConnectMyPool** 
 
 ## Install (HACS)
 
-1. Create a GitHub repo containing this card (or unzip the provided zip and push it).
+1. Create a GitHub repo containing this card.
 2. In Home Assistant: **HACS → Frontend → ⋮ → Custom repositories**
 3. Add your repo URL and select **Lovelace**
 4. Install, restart Home Assistant if prompted.
