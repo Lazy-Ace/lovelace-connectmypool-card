@@ -1,0 +1,6 @@
+{
+  "name": "ConnectMyPool Lovelace Card",
+  "render_readme": true,
+  "content_in_root": false,
+  "filename": "connectmypool-card.js"
+}
