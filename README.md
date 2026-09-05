@@ -13,6 +13,8 @@ A lightweight custom Lovelace card for the **ConnectMyPool** Home Assistant inte
 - Responsive layout that adapts to narrow dashboard columns
 - Missing or obsolete entities are hidden by default
 - Tap an entity name/icon to open Home Assistant's More Info dialog
+- **Visual dashboard editor** with Home Assistant entity pickers and toggles
+- Smart starter configuration when the card is added from the card picker
 
 ## Install with HACS
 
@@ -27,6 +29,21 @@ HACS should add the JavaScript resource automatically. If it does not, add:
 
 as a **JavaScript Module** under **Settings → Dashboards → Resources**.
 
+## Visual editor
+
+From **Edit dashboard → Edit card**, the card now provides a graphical editor for:
+
+- Card title
+- Pool water temperature entity
+- Active Favourite selector
+- Heater entity
+- Automatic ConnectMyPool channel discovery
+- Show unavailable entities
+- Optional Pool / Spa selector
+- Optional solar water-heater entity
+
+Manual `channels`, `valves`, `lights`, and `extra` lists remain available in YAML for advanced layouts. Existing YAML-only settings are preserved when the visual editor is used.
+
 ## Example configuration
 
 ```yaml
@@ -35,11 +52,10 @@ title: Swimming Pool
 temperature: sensor.connectmypool_pool_water_temperature
 favourite: select.connectmypool_active_favourite
 heater: climate.connectmypool_heater_1
-channels: []
 auto_discover: true
 ```
 
-Existing explicit `channels`, `solar`, `valves`, `lights`, and `extra` lists are still supported. Auto-discovery can be disabled with:
+Auto-discovery can be disabled with:
 
 ```yaml
 auto_discover: false
@@ -55,6 +71,6 @@ show_unavailable: true
 
 After updating, hard-refresh the browser. The browser console should show:
 
-`[connectmypool-card] loaded v1.0.4`
+`[connectmypool-card] loaded v1.1.0`
 
 If you see `Custom element doesn't exist: connectmypool-card`, confirm the HACS resource is loaded under **Settings → Dashboards → Resources**.
