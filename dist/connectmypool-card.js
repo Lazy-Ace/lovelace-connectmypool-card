@@ -6,13 +6,14 @@
   }
 
   try {
-    /* ConnectMyPool Lovelace Card v1.0.4
+    /* ConnectMyPool Lovelace Card v1.1.0
      *
      * Lightweight custom card for the ConnectMyPool integration.
      * - Filter pump is treated as a multi-state select.
      * - Other channels are auto-discovered as ordinary switches.
      * - Active Favourite is rendered as a proper select control.
-     * - Layout is responsive and avoids controls overflowing the card.
+     * - Responsive layout avoids controls overflowing the card.
+     * - Includes a native Home Assistant visual configuration editor.
      */
 
     const _panel = customElements.get('ha-panel-lovelace');
@@ -25,7 +26,7 @@
     const html = window.html || LitElement.prototype.html;
     const css = window.css || LitElement.prototype.css;
 
-    console.info('[connectmypool-card] loaded v1.0.4');
+    console.info('[connectmypool-card] loaded v1.1.0');
 
     function domainFromEntityId(entityId) {
       if (!entityId || typeof entityId !== 'string') return null;
@@ -43,12 +44,78 @@
       return null;
     }
 
+    function firstEntity(hass, predicate) {
+      if (!hass?.states) return undefined;
+      const match = Object.values(hass.states).find((st) => {
+        try {
+          return predicate(st);
+        } catch (e) {
+          return false;
+        }
+      });
+      return match?.entity_id;
+    }
+
+    function connectMyPoolStub(hass) {
+      const config = {
+        type: 'custom:connectmypool-card',
+        title: 'Swimming Pool',
+        auto_discover: true,
+        show_unavailable: false,
+      };
+
+      const temperature = firstEntity(
+        hass,
+        (st) =>
+          domainFromEntityId(st.entity_id) === 'sensor' &&
+          st.entity_id.includes('connectmypool') &&
+          (st.entity_id.includes('pool_water_temperature') || st.attributes?.device_class === 'temperature'),
+      );
+      const favourite = firstEntity(
+        hass,
+        (st) =>
+          domainFromEntityId(st.entity_id) === 'select' &&
+          st.entity_id.includes('connectmypool') &&
+          st.entity_id.includes('active_favourite'),
+      );
+      const heater = firstEntity(
+        hass,
+        (st) => domainFromEntityId(st.entity_id) === 'climate' && st.entity_id.includes('connectmypool'),
+      );
+      const poolSpa = firstEntity(
+        hass,
+        (st) =>
+          domainFromEntityId(st.entity_id) === 'select' &&
+          st.entity_id.includes('connectmypool') &&
+          st.entity_id.includes('pool_spa'),
+      );
+      const solar = firstEntity(
+        hass,
+        (st) => domainFromEntityId(st.entity_id) === 'water_heater' && st.entity_id.includes('connectmypool'),
+      );
+
+      if (temperature) config.temperature = temperature;
+      if (favourite) config.favourite = favourite;
+      if (heater) config.heater = heater;
+      if (poolSpa) config.pool_spa = poolSpa;
+      if (solar) config.solar = solar;
+      return config;
+    }
+
     class ConnectMyPoolCard extends LitElement {
       static get properties() {
         return {
           hass: {},
           _config: {},
         };
+      }
+
+      static getConfigElement() {
+        return document.createElement('connectmypool-card-editor');
+      }
+
+      static getStubConfig(hass) {
+        return connectMyPoolStub(hass);
       }
 
       setConfig(config) {
@@ -379,7 +446,6 @@
         const states = Object.values(this.hass.states);
         const discovered = [];
 
-        // Filter pump is function 1 / channel 0 and is intentionally a multi-state select.
         const filterSelect = states.find((st) => {
           if (domainFromEntityId(st.entity_id) !== 'select') return false;
           if (['unavailable', 'unknown'].includes(st.state)) return false;
@@ -389,7 +455,6 @@
         });
         if (filterSelect) discovered.push({ entity: filterSelect.entity_id });
 
-        // All other ConnectMyPool channels are ordinary on/off switches.
         const switches = states
           .filter((st) => {
             if (domainFromEntityId(st.entity_id) !== 'switch') return false;
@@ -568,9 +633,8 @@
         if (!this.hass || !this._config) return html``;
 
         const cfg = this._config;
-        const tempText = cfg.temperature && this._available(cfg.temperature)
-          ? this._formatState(cfg.temperature)
-          : '—';
+        const tempText =
+          cfg.temperature && this._available(cfg.temperature) ? this._formatState(cfg.temperature) : '—';
 
         const heaterRows = cfg.heater && this._available(normalizeItem(cfg.heater)?.entity)
           ? [normalizeItem(cfg.heater)].filter(Boolean)
@@ -595,7 +659,7 @@
               <div class="temp">${tempText}</div>
             </div>
 
-            ${(favouriteControl || poolSpaChip)
+            ${favouriteControl || poolSpaChip
               ? html`
                   <div class="header-controls">
                     ${favouriteControl}
@@ -615,16 +679,184 @@
       }
     }
 
+    class ConnectMyPoolCardEditor extends LitElement {
+      static get properties() {
+        return {
+          hass: {},
+          _config: {},
+        };
+      }
+
+      setConfig(config) {
+        this._config = { ...config };
+      }
+
+      static get styles() {
+        return css`
+          :host {
+            display: block;
+            padding: 4px 0 12px;
+          }
+          .section {
+            margin: 0 0 18px;
+          }
+          .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin: 4px 0 10px;
+          }
+          .field {
+            margin: 0 0 12px;
+          }
+          ha-textfield,
+          ha-entity-picker {
+            display: block;
+            width: 100%;
+          }
+          .toggle {
+            display: flex;
+            align-items: center;
+            min-height: 44px;
+          }
+          .hint {
+            color: var(--secondary-text-color);
+            font-size: 0.86rem;
+            line-height: 1.4;
+            margin-top: 6px;
+          }
+          .advanced {
+            padding-top: 4px;
+            border-top: 1px solid var(--divider-color);
+          }
+        `;
+      }
+
+      _fireConfigChanged(config) {
+        const event = new CustomEvent('config-changed', {
+          detail: { config },
+          bubbles: true,
+          composed: true,
+        });
+        this.dispatchEvent(event);
+      }
+
+      _setValue(key, value) {
+        const config = { ...this._config };
+        if (value === undefined || value === null || value === '') {
+          delete config[key];
+        } else {
+          config[key] = value;
+        }
+        this._config = config;
+        this._fireConfigChanged(config);
+      }
+
+      _textChanged(key, ev) {
+        const value = ev?.target?.value ?? '';
+        this._setValue(key, value);
+      }
+
+      _entityChanged(key, ev) {
+        const value = ev?.detail?.value ?? ev?.target?.value ?? '';
+        this._setValue(key, value);
+      }
+
+      _toggleChanged(key, ev) {
+        this._setValue(key, !!ev?.target?.checked);
+      }
+
+      _entityPicker(label, key, domains) {
+        return html`
+          <div class="field">
+            <ha-entity-picker
+              .hass=${this.hass}
+              .value=${this._config?.[key] || ''}
+              .label=${label}
+              .includeDomains=${domains}
+              .allowCustomEntity=${true}
+              @value-changed=${(ev) => this._entityChanged(key, ev)}
+            ></ha-entity-picker>
+          </div>
+        `;
+      }
+
+      render() {
+        if (!this.hass || !this._config) return html``;
+
+        const autoDiscover = this._config.auto_discover !== false;
+        const showUnavailable = this._config.show_unavailable === true;
+
+        return html`
+          <div class="section">
+            <div class="section-title">General</div>
+            <div class="field">
+              <ha-textfield
+                label="Card title"
+                .value=${this._config.title || ''}
+                @input=${(ev) => this._textChanged('title', ev)}
+              ></ha-textfield>
+            </div>
+            ${this._entityPicker('Pool water temperature', 'temperature', ['sensor'])}
+            ${this._entityPicker('Active favourite', 'favourite', ['select'])}
+            ${this._entityPicker('Heater', 'heater', ['climate'])}
+          </div>
+
+          <div class="section">
+            <div class="section-title">Discovery</div>
+            <div class="toggle">
+              <ha-formfield label="Automatically discover ConnectMyPool channels">
+                <ha-switch
+                  .checked=${autoDiscover}
+                  @change=${(ev) => this._toggleChanged('auto_discover', ev)}
+                ></ha-switch>
+              </ha-formfield>
+            </div>
+            <div class="hint">
+              Recommended. The card automatically finds the Filter Pump mode selector plus Spa Jets,
+              Spa Blower and Heater Pump switches from the integration's channel metadata.
+            </div>
+            <div class="toggle">
+              <ha-formfield label="Show unavailable entities">
+                <ha-switch
+                  .checked=${showUnavailable}
+                  @change=${(ev) => this._toggleChanged('show_unavailable', ev)}
+                ></ha-switch>
+              </ha-formfield>
+            </div>
+          </div>
+
+          <div class="section advanced">
+            <div class="section-title">Optional</div>
+            ${this._entityPicker('Pool / Spa selector', 'pool_spa', ['select'])}
+            ${this._entityPicker('Solar water heater', 'solar', ['water_heater'])}
+            <div class="hint">
+              Manual channel, valve, light and extra-entity lists remain available in YAML for advanced
+              layouts. Existing YAML-only options are preserved when this editor is used.
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    if (!customElements.get('connectmypool-card-editor')) {
+      customElements.define('connectmypool-card-editor', ConnectMyPoolCardEditor);
+    }
+
     if (!customElements.get('connectmypool-card')) {
       customElements.define('connectmypool-card', ConnectMyPoolCard);
     }
 
     window.customCards = window.customCards || [];
-    window.customCards.push({
-      type: 'connectmypool-card',
-      name: 'ConnectMyPool Card',
-      description: 'A dashboard card for the ConnectMyPool integration.',
-    });
+    const alreadyRegistered = window.customCards.some((card) => card.type === 'connectmypool-card');
+    if (!alreadyRegistered) {
+      window.customCards.push({
+        type: 'connectmypool-card',
+        name: 'ConnectMyPool Card',
+        description: 'A dashboard card for the ConnectMyPool integration.',
+        preview: true,
+        documentationURL: 'https://github.com/Lazy-Ace/lovelace-connectmypool-card',
+      });
+    }
   } catch (e) {
     console.error('[connectmypool-card] failed to load', e);
   }
