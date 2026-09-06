@@ -6,14 +6,14 @@
   }
 
   try {
-    /* ConnectMyPool Lovelace Card v1.1.1
+    /* ConnectMyPool Lovelace Card v1.1.2
      *
      * Dashboard card for the ConnectMyPool integration.
      * - Filter pump is a multi-state selector.
      * - Other channels are ordinary switches.
      * - Active Favourite is a selector.
      * - Responsive layout and native visual editor.
-     * - Interactive controls show a busy spinner while HA/API calls complete.
+     * - Interactive controls show clear busy feedback while HA/API calls complete.
      */
 
     const _panel = customElements.get('ha-panel-lovelace');
@@ -26,7 +26,7 @@
     const html = window.html || LitElement.prototype.html;
     const css = window.css || LitElement.prototype.css;
 
-    console.info('[connectmypool-card] loaded v1.1.1');
+    console.info('[connectmypool-card] loaded v1.1.2');
 
     function domainFromEntityId(entityId) {
       if (!entityId || typeof entityId !== 'string') return null;
@@ -113,6 +113,7 @@
       constructor() {
         super();
         this._busyEntities = new Set();
+        this._busyLabels = new Map();
       }
 
       static getConfigElement() {
@@ -213,7 +214,7 @@
             font-size: 0.82rem; opacity: 0.8; white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis;
           }
-          .state.updating { color: var(--primary-color); opacity: 1; }
+          .state.updating { color: var(--primary-color); opacity: 1; font-weight: 500; }
           .controls {
             display: flex; align-items: center; gap: 8px;
             flex: 0 1 auto; min-width: 0; max-width: 58%;
@@ -231,12 +232,29 @@
           .btn:disabled { opacity: 0.55; cursor: default; }
           .slider { width: 150px; max-width: 34vw; }
           .spinner {
-            width: 16px; height: 16px; flex: 0 0 16px;
+            width: 18px; height: 18px; flex: 0 0 18px;
             box-sizing: border-box; border-radius: 50%;
             border: 2px solid var(--divider-color);
             border-top-color: var(--primary-color);
             animation: cmp-spin 0.8s linear infinite;
           }
+          .busy-control {
+            min-width: 180px;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-sizing: border-box;
+            padding: 8px 12px;
+            background: var(--secondary-background-color);
+            border-radius: 8px;
+            color: var(--primary-color);
+            font-size: 0.86rem;
+            font-weight: 500;
+            white-space: nowrap;
+          }
+          .header-control .busy-control { width: 220px; }
           @keyframes cmp-spin { to { transform: rotate(360deg); } }
           .muted { opacity: 0.65; }
 
@@ -247,11 +265,13 @@
             .header-control ha-select {
               flex: 1 1 auto; width: auto; max-width: none;
             }
+            .header-control .busy-control { flex: 1 1 auto; width: auto; }
             .row { align-items: flex-start; flex-wrap: wrap; }
             .controls {
               flex: 1 1 100%; width: 100%; max-width: none; justify-content: flex-end;
             }
             .controls ha-select { flex: 1 1 auto; width: 100%; max-width: none; }
+            .busy-control { flex: 1 1 auto; width: 100%; min-width: 0; }
             .slider { flex: 1 1 140px; width: auto; max-width: none; }
           }
         `;
@@ -281,17 +301,23 @@
         return s;
       }
       _isBusy(entityId) { return this._busyEntities.has(entityId); }
+      _busyLabel(entityId) { return this._busyLabels.get(entityId) || 'Updating…'; }
 
-      async _runBusy(entityId, action) {
+      async _runBusy(entityId, action, label = 'Updating…') {
         if (!entityId || this._isBusy(entityId)) return;
         this._busyEntities.add(entityId);
+        this._busyLabels.set(entityId, label);
         this.requestUpdate();
         try {
+          // Force one rendered frame before starting a potentially slow cloud call.
+          await this.updateComplete;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           await action();
         } catch (err) {
           console.error(`[connectmypool-card] action failed for ${entityId}`, err);
         } finally {
           this._busyEntities.delete(entityId);
+          this._busyLabels.delete(entityId);
           this.requestUpdate();
         }
       }
@@ -302,32 +328,66 @@
       _toggle(entityId) {
         const d = domainFromEntityId(entityId);
         if (!['switch', 'light'].includes(d)) return;
-        return this._runBusy(entityId, () => this._call(d, 'toggle', { entity_id: entityId }));
+        const current = this._state(entityId)?.state;
+        const target = current === 'on' ? 'Off' : 'On';
+        return this._runBusy(
+          entityId,
+          () => this._call(d, 'toggle', { entity_id: entityId }),
+          `Switching ${target}…`,
+        );
+      }
+      _closeSelect(control) {
+        if (!control) return;
+        try { control.blur?.(); } catch (e) { /* ignore */ }
+        try { if ('open' in control) control.open = false; } catch (e) { /* ignore */ }
+        try { if ('menuOpen' in control) control.menuOpen = false; } catch (e) { /* ignore */ }
+        try {
+          const inner = control.shadowRoot?.querySelector('mwc-select, md-select');
+          inner?.blur?.();
+          if (inner && 'open' in inner) inner.open = false;
+          if (inner && 'menuOpen' in inner) inner.menuOpen = false;
+        } catch (e) { /* ignore */ }
+      }
+      _handleSelect(entityId, ev) {
+        const control = ev?.currentTarget;
+        const option = control?.value ?? ev?.target?.value;
+        this._closeSelect(control);
+        return this._setSelect(entityId, option);
       }
       _setSelect(entityId, option) {
         if (!option || this._state(entityId)?.state === option) return;
-        return this._runBusy(entityId, () =>
-          this._call('select', 'select_option', { entity_id: entityId, option }),
+        return this._runBusy(
+          entityId,
+          () => this._call('select', 'select_option', { entity_id: entityId, option }),
+          `Updating to ${option}…`,
         );
       }
       _setClimateMode(entityId, hvac_mode) {
-        return this._runBusy(entityId, () =>
-          this._call('climate', 'set_hvac_mode', { entity_id: entityId, hvac_mode }),
+        return this._runBusy(
+          entityId,
+          () => this._call('climate', 'set_hvac_mode', { entity_id: entityId, hvac_mode }),
+          `Setting ${hvac_mode}…`,
         );
       }
       _setClimateTemp(entityId, temperature) {
-        return this._runBusy(entityId, () =>
-          this._call('climate', 'set_temperature', { entity_id: entityId, temperature }),
+        return this._runBusy(
+          entityId,
+          () => this._call('climate', 'set_temperature', { entity_id: entityId, temperature }),
+          `Setting ${temperature}°…`,
         );
       }
       _setWaterHeaterMode(entityId, operation_mode) {
-        return this._runBusy(entityId, () =>
-          this._call('water_heater', 'set_operation_mode', { entity_id: entityId, operation_mode }),
+        return this._runBusy(
+          entityId,
+          () => this._call('water_heater', 'set_operation_mode', { entity_id: entityId, operation_mode }),
+          `Setting ${operation_mode}…`,
         );
       }
       _setWaterHeaterTemp(entityId, temperature) {
-        return this._runBusy(entityId, () =>
-          this._call('water_heater', 'set_temperature', { entity_id: entityId, temperature }),
+        return this._runBusy(
+          entityId,
+          () => this._call('water_heater', 'set_temperature', { entity_id: entityId, temperature }),
+          `Setting ${temperature}°…`,
         );
       }
       _moreInfo(entityId) {
@@ -337,8 +397,16 @@
       }
       _spinner(entityId) {
         return this._isBusy(entityId)
-          ? html`<span class="spinner" role="status" title="Updating"></span>`
+          ? html`<span class="spinner" role="status" title=${this._busyLabel(entityId)}></span>`
           : html``;
+      }
+      _busyControl(entityId) {
+        return html`
+          <div class="busy-control" role="status">
+            ${this._spinner(entityId)}
+            <span>${this._busyLabel(entityId)}</span>
+          </div>
+        `;
       }
 
       _renderChip(label, entityId) {
@@ -358,14 +426,16 @@
         return html`
           <div class="header-control">
             <span class="header-label">Favourite</span>
-            <ha-select
-              .value=${st.state}
-              ?disabled=${busy}
-              @selected=${(ev) => this._setSelect(entityId, ev.target.value)}
-            >
-              ${options.map((o) => html`<mwc-list-item .value=${o}>${o}</mwc-list-item>`)}
-            </ha-select>
-            ${this._spinner(entityId)}
+            ${busy
+              ? this._busyControl(entityId)
+              : html`
+                  <ha-select
+                    .value=${st.state}
+                    @selected=${(ev) => this._handleSelect(entityId, ev)}
+                  >
+                    ${options.map((o) => html`<mwc-list-item .value=${o}>${o}</mwc-list-item>`)}
+                  </ha-select>
+                `}
           </div>
         `;
       }
@@ -419,7 +489,7 @@
         const icon = item.icon || st?.attributes?.icon || null;
         const name = this._displayName(entityId, item);
         const busy = this._isBusy(entityId);
-        const stateText = busy ? 'Updating…' : this._formatState(entityId);
+        const stateText = busy ? this._busyLabel(entityId) : this._formatState(entityId);
         const selectClass = domain === 'select' ? 'row select-row' : 'row';
         return html`
           <div class=${selectClass}>
@@ -451,12 +521,11 @@
 
         if (domain === 'select') {
           const options = st.attributes?.options || [];
+          if (busy) return this._busyControl(entityId);
           return html`
-            ${this._spinner(entityId)}
             <ha-select
               .value=${st.state}
-              ?disabled=${busy}
-              @selected=${(ev) => this._setSelect(entityId, ev.target.value)}
+              @selected=${(ev) => this._handleSelect(entityId, ev)}
             >
               ${options.map((o) => html`<mwc-list-item .value=${o}>${o}</mwc-list-item>`)}
             </ha-select>
