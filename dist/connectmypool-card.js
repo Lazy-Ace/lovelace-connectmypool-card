@@ -6,11 +6,11 @@
   }
 
   try {
-    /* ConnectMyPool Lovelace Card v1.1.2
+    /* ConnectMyPool Lovelace Card v1.2.0
      *
      * Dashboard card for the ConnectMyPool integration.
-     * - Filter pump is a multi-state selector.
-     * - Other channels are ordinary switches.
+     * - Channels are multi-state mode selectors (Off / Auto / On, filter pump speeds).
+     * - Legacy channel switches from older integration versions are still supported.
      * - Active Favourite is a selector.
      * - Responsive layout and native visual editor.
      * - Interactive controls show clear busy feedback while HA/API calls complete.
@@ -26,12 +26,35 @@
     const html = window.html || LitElement.prototype.html;
     const css = window.css || LitElement.prototype.css;
 
-    console.info('[connectmypool-card] loaded v1.1.2');
+    console.info('[connectmypool-card] loaded v1.2.0');
 
     function domainFromEntityId(entityId) {
       if (!entityId || typeof entityId !== 'string') return null;
       const idx = entityId.indexOf('.');
       return idx > 0 ? entityId.slice(0, idx) : null;
+    }
+
+    // Pending channel changes stay visible until the (lagging) cloud status catches up.
+    const PENDING_TIMEOUT_MS = 90000;
+
+    const CHANNEL_ICONS = {
+      1: 'mdi:pump',
+      3: 'mdi:heat-pump',
+      12: 'mdi:hot-tub',
+      18: 'mdi:weather-windy',
+    };
+
+    function isChannelSelect(st) {
+      if (!st || domainFromEntityId(st.entity_id) !== 'select') return false;
+      const ch = st.attributes?.channel_number;
+      return ch !== undefined && ch !== null && !isNaN(Number(ch));
+    }
+
+    function modeTone(option) {
+      const o = String(option || '').toLowerCase();
+      if (o === 'off') return 'off';
+      if (o === 'auto') return 'auto';
+      return 'on';
     }
 
     function normalizeList(list) {
@@ -114,6 +137,7 @@
         super();
         this._busyEntities = new Set();
         this._busyLabels = new Map();
+        this._pending = new Map();
       }
 
       static getConfigElement() {
@@ -217,7 +241,7 @@
           .state.updating { color: var(--primary-color); opacity: 1; font-weight: 500; }
           .controls {
             display: flex; align-items: center; gap: 8px;
-            flex: 0 1 auto; min-width: 0; max-width: 58%;
+            flex: 0 1 auto; min-width: 0; max-width: 70%;
           }
           .controls ha-select { width: 180px; max-width: 100%; min-width: 135px; }
           .btn {
@@ -230,6 +254,14 @@
             border-color: var(--primary-color);
           }
           .btn:disabled { opacity: 0.55; cursor: default; }
+          .modes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+          .btn[pending] {
+            border-color: var(--primary-color); border-style: dashed;
+            color: var(--primary-color); opacity: 1;
+          }
+          ha-icon.tone-off { color: var(--disabled-text-color, var(--secondary-text-color)); }
+          ha-icon.tone-auto { color: var(--primary-color); }
+          ha-icon.tone-on { color: var(--state-active-color, var(--state-icon-active-color, #fdd835)); }
           .slider { width: 150px; max-width: 34vw; }
           .spinner {
             width: 18px; height: 18px; flex: 0 0 18px;
@@ -362,6 +394,50 @@
           `Updating to ${option}…`,
         );
       }
+      _setChannelMode(entityId, option) {
+        if (!option || this._isBusy(entityId)) return;
+        if (this._state(entityId)?.state === option && !this._pending.has(entityId)) return;
+        this._pending.set(entityId, { target: option, until: Date.now() + PENDING_TIMEOUT_MS });
+        return this._runBusy(
+          entityId,
+          async () => {
+            try {
+              await this._call('select', 'select_option', { entity_id: entityId, option });
+            } catch (err) {
+              this._pending.delete(entityId);
+              throw err;
+            }
+            this._schedulePendingExpiry();
+          },
+          `Changing to ${option}…`,
+        );
+      }
+      _pendingTarget(entityId) {
+        const p = this._pending.get(entityId);
+        if (!p) return null;
+        const st = this._state(entityId);
+        if (Date.now() > p.until || st?.state === p.target) {
+          this._pending.delete(entityId);
+          return null;
+        }
+        return p.target;
+      }
+      _schedulePendingExpiry() {
+        if (this._pendingTimer) return;
+        this._pendingTimer = setInterval(() => {
+          for (const id of [...this._pending.keys()]) this._pendingTarget(id);
+          if (!this._pending.size) {
+            clearInterval(this._pendingTimer);
+            this._pendingTimer = null;
+          }
+          this.requestUpdate();
+        }, 2000);
+      }
+      disconnectedCallback() {
+        super.disconnectedCallback?.();
+        if (this._pendingTimer) clearInterval(this._pendingTimer);
+        this._pendingTimer = null;
+      }
       _setClimateMode(entityId, hvac_mode) {
         return this._runBusy(
           entityId,
@@ -442,28 +518,26 @@
 
       _discoverChannels() {
         if (!this._config.auto_discover || !this.hass?.states) return [];
-        const states = Object.values(this.hass.states);
-        const discovered = [];
-        const filterSelect = states.find((st) => {
-          if (domainFromEntityId(st.entity_id) !== 'select') return false;
-          if (['unavailable', 'unknown'].includes(st.state)) return false;
-          const ch = Number(st.attributes?.channel_number);
-          const fn = Number(st.attributes?.function);
-          return ch === 0 || fn === 1;
-        });
-        if (filterSelect) discovered.push({ entity: filterSelect.entity_id });
+        const usable = (st) => !['unavailable', 'unknown'].includes(st.state);
+        const hasChannel = (st) => {
+          const ch = st.attributes?.channel_number;
+          return ch !== undefined && ch !== null && !isNaN(Number(ch));
+        };
+        const byChannel = (a, b) => Number(a.attributes.channel_number) - Number(b.attributes.channel_number);
+        const states = Object.values(this.hass.states).filter(usable);
 
-        const switches = states
-          .filter((st) => {
-            if (domainFromEntityId(st.entity_id) !== 'switch') return false;
-            if (['unavailable', 'unknown'].includes(st.state)) return false;
-            const ch = st.attributes?.channel_number;
-            const fn = Number(st.attributes?.function);
-            return ch !== undefined && ch !== null && fn !== 1 && Number(ch) !== 0;
-          })
-          .sort((a, b) => Number(a.attributes.channel_number) - Number(b.attributes.channel_number));
-        for (const st of switches) discovered.push({ entity: st.entity_id });
-        return discovered;
+        // Channel mode selects (every channel, including the filter pump). Disabled
+        // entities (e.g. the Heater Pump by default) have no state and are skipped.
+        const selects = states.filter(isChannelSelect);
+        const covered = new Set(selects.map((st) => Number(st.attributes.channel_number)));
+
+        // Legacy on/off channel switches, only for channels without a mode select.
+        const switches = states.filter((st) =>
+          domainFromEntityId(st.entity_id) === 'switch' &&
+          hasChannel(st) &&
+          !covered.has(Number(st.attributes.channel_number)));
+
+        return [...selects, ...switches].sort(byChannel).map((st) => ({ entity: st.entity_id }));
       }
 
       _mergeItems(explicit, discovered = []) {
@@ -486,18 +560,28 @@
         const entityId = item.entity;
         const st = this._state(entityId);
         const domain = domainFromEntityId(entityId);
-        const icon = item.icon || st?.attributes?.icon || null;
+        const channel = isChannelSelect(st);
+        const icon = item.icon || st?.attributes?.icon ||
+          (channel ? CHANNEL_ICONS[Number(st.attributes.function)] : null) || null;
         const name = this._displayName(entityId, item);
         const busy = this._isBusy(entityId);
-        const stateText = busy ? this._busyLabel(entityId) : this._formatState(entityId);
+        const pending = channel && !busy ? this._pendingTarget(entityId) : null;
+        const stateText = busy
+          ? this._busyLabel(entityId)
+          : pending
+            ? `${this._formatState(entityId)} → ${pending} (waiting for controller…)`
+            : this._formatState(entityId);
         const selectClass = domain === 'select' ? 'row select-row' : 'row';
+        const iconClass = channel && !['unavailable', 'unknown'].includes(st.state)
+          ? `tone-${modeTone(st.state)}`
+          : '';
         return html`
           <div class=${selectClass}>
             <div class="left" @click=${() => this._moreInfo(entityId)}>
-              <ha-icon .icon=${icon || 'mdi:pool'}></ha-icon>
+              <ha-icon class=${iconClass} .icon=${icon || 'mdi:pool'}></ha-icon>
               <div class="left-text">
                 <div class="name" title=${name}>${name}</div>
-                <div class=${busy ? 'state updating' : 'state'}>${stateText}</div>
+                <div class=${busy || pending ? 'state updating' : 'state'}>${stateText}</div>
               </div>
             </div>
             <div class="controls">${this._renderControls(domain, entityId, st)}</div>
@@ -516,6 +600,26 @@
             <button class="btn" ?active=${isOn} ?disabled=${busy} @click=${() => this._toggle(entityId)}>
               ${isOn ? 'On' : 'Off'}
             </button>
+          `;
+        }
+
+        if (domain === 'select' && isChannelSelect(st)) {
+          const options = st.attributes?.options || [];
+          const target = this._pending.get(entityId)?.target;
+          return html`
+            ${this._spinner(entityId)}
+            <div class="modes" role="group">
+              ${options.map((o) => html`
+                <button
+                  class="btn"
+                  ?active=${st.state === o}
+                  ?pending=${target === o && st.state !== o}
+                  ?disabled=${busy}
+                  aria-pressed=${st.state === o ? 'true' : 'false'}
+                  @click=${() => this._setChannelMode(entityId, o)}
+                >${o}</button>
+              `)}
+            </div>
           `;
         }
 
@@ -739,8 +843,8 @@
               </ha-formfield>
             </div>
             <div class="hint">
-              Recommended. The card automatically finds the Filter Pump mode selector plus Spa Jets,
-              Spa Blower and Heater Pump switches from the integration's channel metadata.
+              Recommended. The card automatically finds every enabled channel mode selector
+              (Filter Pump, Spa Jets, Spa Blower, …) from the integration's channel metadata.
             </div>
             <div class="toggle">
               <ha-formfield label="Show unavailable entities">

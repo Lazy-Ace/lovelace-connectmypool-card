@@ -7,8 +7,12 @@ A lightweight custom Lovelace card for the **ConnectMyPool** Home Assistant inte
 - Pool water temperature display
 - Heater climate control
 - **Active Favourite** as a proper drop-down selector
-- Filter pump as a multi-state selector (`Off`, `Auto`, `Medium Speed`, `High Speed`)
-- Spa Jets, Spa Blower and Heater Pump as ordinary on/off controls
+- Every channel as a row of mode buttons: Filter Pump (`Off`, `Auto`, `Medium Speed`, `High Speed`),
+  Spa Jets and Spa Blower (`Off`, `Auto`, `On`), using `select.select_option`
+- Per-mode visual feedback: active mode highlighted, icon tinted for Off / Auto / On, and a
+  "waiting for controller" indicator until the cloud status confirms the new mode
+- Channels whose entity is disabled (e.g. the Heater Pump by default) are not shown
+- Legacy on/off channel switches from older integration versions are still supported
 - Automatic channel discovery from ConnectMyPool entity metadata
 - Responsive layout that adapts to narrow dashboard columns
 - Missing or obsolete entities are hidden by default
@@ -71,6 +75,21 @@ show_unavailable: true
 
 After updating, hard-refresh the browser. The browser console should show:
 
-`[connectmypool-card] loaded v1.1.0`
+`[connectmypool-card] loaded v1.2.0`
+
+### Upgrading from switch-based channels
+
+Newer ConnectMyPool integration versions expose channels as `select.*_mode` entities instead of
+`switch.*` entities. If your card YAML lists channel switches explicitly, replace them, for example:
+
+```yaml
+channels:
+  - select.connectmypool_filter_pump_mode
+  - select.connectmypool_jets_mode
+  - select.connectmypool_blower_mode
+```
+
+or remove the `channels` list and let auto-discovery find them. Channel mode changes are sent to the
+controller one step at a time, so a multi-step change (e.g. Filter Pump Off → High Speed) can take up to about a minute while the card shows its busy state.
 
 If you see `Custom element doesn't exist: connectmypool-card`, confirm the HACS resource is loaded under **Settings → Dashboards → Resources**.
