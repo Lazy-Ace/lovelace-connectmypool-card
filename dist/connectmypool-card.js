@@ -50,6 +50,13 @@
       return ch !== undefined && ch !== null && !isNaN(Number(ch));
     }
 
+    // Heater-pump channels energise heating circulation; keep them off the card unless opted in.
+    function isHeaterPumpChannel(st) {
+      const fn = Number(st.attributes?.function);
+      const name = String(st.attributes?.friendly_name || st.entity_id).toLowerCase();
+      return fn === 3 || name.includes('heat');
+    }
+
     function modeTone(option) {
       const o = String(option || '').toLowerCase();
       if (o === 'off') return 'off';
@@ -163,6 +170,7 @@
           extra: normalizeList(config.extra).map(normalizeItem).filter(Boolean),
           auto_discover: config.auto_discover !== false,
           show_unavailable: config.show_unavailable === true,
+          show_heater_pump: config.show_heater_pump === true,
         };
       }
 
@@ -223,7 +231,9 @@
             box-shadow: 0 1px 0 rgba(0,0,0,0.05) inset;
             border: 1px solid var(--divider-color);
           }
-          .row.select-row { grid-column: 1 / -1; }
+          .row.select-row { grid-column: 1 / -1; flex-wrap: wrap; }
+          .row.select-row .left { flex: 1 1 180px; }
+          .row.select-row .controls { margin-left: auto; }
           .left {
             display: flex; align-items: center; gap: 10px;
             flex: 1 1 0; min-width: 0; cursor: pointer;
@@ -528,14 +538,17 @@
 
         // Channel mode selects (every channel, including the filter pump). Disabled
         // entities (e.g. the Heater Pump by default) have no state and are skipped.
-        const selects = states.filter(isChannelSelect);
+        // Heater-pump channels are only discovered when show_heater_pump is set.
+        const selects = states.filter((st) =>
+          isChannelSelect(st) && (this._config.show_heater_pump || !isHeaterPumpChannel(st)));
         const covered = new Set(selects.map((st) => Number(st.attributes.channel_number)));
 
         // Legacy on/off channel switches, only for channels without a mode select.
         const switches = states.filter((st) =>
           domainFromEntityId(st.entity_id) === 'switch' &&
           hasChannel(st) &&
-          !covered.has(Number(st.attributes.channel_number)));
+          !covered.has(Number(st.attributes.channel_number)) &&
+          (this._config.show_heater_pump || !isHeaterPumpChannel(st)));
 
         return [...selects, ...switches].sort(byChannel).map((st) => ({ entity: st.entity_id }));
       }
@@ -845,6 +858,14 @@
             <div class="hint">
               Recommended. The card automatically finds every enabled channel mode selector
               (Filter Pump, Spa Jets, Spa Blower, …) from the integration's channel metadata.
+            </div>
+            <div class="toggle">
+              <ha-formfield label="Show Heater Pump channel">
+                <ha-switch
+                  .checked=${this._config.show_heater_pump === true}
+                  @change=${(ev) => this._toggleChanged('show_heater_pump', ev)}
+                ></ha-switch>
+              </ha-formfield>
             </div>
             <div class="toggle">
               <ha-formfield label="Show unavailable entities">

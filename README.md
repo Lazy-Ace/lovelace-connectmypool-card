@@ -11,7 +11,8 @@ A lightweight custom Lovelace card for the **ConnectMyPool** Home Assistant inte
   Spa Jets and Spa Blower (`Off`, `Auto`, `On`), using `select.select_option`
 - Per-mode visual feedback: active mode highlighted, icon tinted for Off / Auto / On, and a
   "waiting for controller" indicator until the cloud status confirms the new mode
-- Channels whose entity is disabled (e.g. the Heater Pump by default) are not shown
+- The Heater Pump channel is never auto-discovered unless `show_heater_pump: true` is set (it energises
+  heating circulation), and disabled channel entities are never shown
 - Legacy on/off channel switches from older integration versions are still supported
 - Automatic channel discovery from ConnectMyPool entity metadata
 - Responsive layout that adapts to narrow dashboard columns
@@ -63,6 +64,12 @@ Auto-discovery can be disabled with:
 
 ```yaml
 auto_discover: false
+```
+
+The Heater Pump channel is hidden from auto-discovery by default, even when its entity is enabled. To show it:
+
+```yaml
+show_heater_pump: true
 ```
 
 Unavailable or missing entities are hidden by default. To show them for troubleshooting:
